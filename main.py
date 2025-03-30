@@ -27,6 +27,7 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 TOPICS_FILE = "topics.json"
 SEND_INITIAL_EMAILS = False  # Set to True to send emails with topics on startup
+CHECK_TIMES = ["09:00", "12:00", "15:00", "21:00", "00:00"]  # Times to check for new topics
 
 # User-Agent header for HTTP requests
 USER_AGENT = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"}
@@ -160,7 +161,7 @@ def login(session: requests.Session, login: str, password: str) -> None:
     }
     
     response = session.post(url, headers=USER_AGENT, data=payload)
-    if "Podano nieprawidłowe hasło" in response.text:
+    if "Podano nieprawidÅowe hasÅo" in response.text:
         raise ValueError("Login failed, check your credentials")
     
     logging.info("Successfully logged in")
@@ -184,7 +185,7 @@ def check_topics() -> None:
                 logging.info("New topics found!")
                 save_topics(new_topics)
                 for topic in new_topics:
-                    send_email(f"{topic['topic']}", f"<b>Temat:</b> {topic['topic']}<br><b>Osoba zgłaszająca temat:</b> {topic['provider']}<br><b>Link:</b> {topic['link']}")
+                    send_email(f"{topic['topic']}", f"<b>Temat:</b> {topic['topic']}<br><b>Osoba zgÅaszajÄca temat:</b> {topic['provider']}<br><b>Link:</b> {topic['link']}")
                     
             return
 
@@ -218,8 +219,8 @@ if __name__ == "__main__":
         topics = get_topics(session)
         save_topics(topics)
 
-    for hour in ["09:00", "12:00", "15:00", "18:00", "21:00", "00:00"]:
-        schedule.every().day.at(hour).do(check_topics)
+    for check_time in CHECK_TIMES:
+        schedule.every().day.at(check_time).do(check_topics_with_delay)
 
     while True:
         schedule.run_pending()
