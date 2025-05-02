@@ -1,12 +1,14 @@
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
+from typing import List, Dict
+from datetime import datetime
 from lxml import html
 import requests
 import schedule
 import smtplib
-import random
 import logging
+import random
 import json
 import time
 import os
@@ -21,13 +23,13 @@ ELOGIN_PASSWORD = os.getenv("ELOGIN_PASSWORD")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 APP_PASSWORD = os.getenv("APP_PASSWORD")
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+SEND_INITIAL_EMAILS = os.getenv("SEND_INITIAL_EMAILS", "False").lower() in ("true", "1", "yes")
+CHECK_TIMES_RAW = os.getenv("CHECK_TIMES", "09:00,12:00,15:00,21:00,00:00")
 
-# Configuration
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
+# File to store topics
 TOPICS_FILE = "topics.json"
-SEND_INITIAL_EMAILS = False  # Set to True to send emails with topics on startup
-CHECK_TIMES = ["09:00", "12:00", "15:00", "21:00", "00:00"]  # Times to check for new topics
 
 # User-Agent header for HTTP requests
 USER_AGENT = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"}
@@ -77,7 +79,7 @@ def send_email(subject: str, body: str) -> None:
 
 
 # Fetches the list of available topics
-def get_topics(session: requests.Session) -> list:
+def get_topics(session: requests.Session) -> List[Dict[str, str]]:
 
     # Fetch topics page
     url = "https://usosapd.put.poznan.pl/topics/browse/"
@@ -161,7 +163,7 @@ def login(session: requests.Session, login: str, password: str) -> None:
     }
     
     response = session.post(url, headers=USER_AGENT, data=payload)
-    if "Podano nieprawidÅowe hasÅo" in response.text:
+    if "Podano nieprawidłowe hasło" in response.text:
         raise ValueError("Login failed, check your credentials")
     
     logging.info("Successfully logged in")
@@ -177,7 +179,7 @@ def check_topics() -> None:
 
     while attempt < 2:
         try:
-            logging.info("Atempt number: " + str(attempt + 1))
+            logging.info("Attempt number: " + str(attempt + 1))
             topics = get_topics(session)
             new_topics = [topic for topic in topics if topic not in last_topics]
 
@@ -185,7 +187,7 @@ def check_topics() -> None:
                 logging.info("New topics found!")
                 save_topics(new_topics)
                 for topic in new_topics:
-                    send_email(f"{topic['topic']}", f"<b>Temat:</b> {topic['topic']}<br><b>Osoba zgÅaszajÄca temat:</b> {topic['provider']}<br><b>Link:</b> {topic['link']}")
+                    send_email(f"{topic['topic']}", f"<b>Temat:</b> {topic['topic']}<br><b>Osoba zgłaszająca temat:</b> {topic['provider']}<br><b>Link:</b> {topic['link']}")
                     
             return
 
@@ -207,10 +209,33 @@ def check_topics_with_delay():
     check_topics()
 
 
+# Parses the check times from the environment variable
+def parse_check_times(check_times_raw: str) -> List[str]:
+    check_times = []
+    for time_str in check_times_raw.split(","):
+        time_str = time_str.strip()
+        try:
+            datetime.strptime(time_str, "%H:%M")
+            check_times.append(time_str)
+        except ValueError:
+            logging.warning(f"Invalid time format in CHECK_TIMES: '{time_str}' (expected HH:MM)")
+    return check_times
+
+
 if __name__ == "__main__":
     if not ELOGIN_LOGIN or not ELOGIN_PASSWORD:
         logging.critical("Missing eLogin login or password in .env file! Check configuration.")
         exit(1)
+
+    if not SENDER_EMAIL or not APP_PASSWORD or not RECEIVER_EMAIL:
+        logging.critical("Missing email credentials in .env file! Check configuration.")
+        exit(1)
+
+    check_times = parse_check_times(CHECK_TIMES_RAW)
+
+    if not check_times:
+        check_times = ["09:00", "12:00", "15:00", "21:00", "00:00"]
+        logging.warning("No valid check times provided in .env file! Using default times: 09:00, 12:00, 15:00, 21:00, 00:00")
 
     session = requests.Session()
     login(session, ELOGIN_LOGIN, ELOGIN_PASSWORD)
@@ -219,7 +244,7 @@ if __name__ == "__main__":
         topics = get_topics(session)
         save_topics(topics)
 
-    for check_time in CHECK_TIMES:
+    for check_time in check_times:
         schedule.every().day.at(check_time).do(check_topics_with_delay)
 
     while True:
